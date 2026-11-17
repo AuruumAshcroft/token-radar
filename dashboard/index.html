@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Radar — pre-token protocols by implied value</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="pulse" aria-hidden="true"></span>
+    <h1>TOKEN RADAR</h1>
+    <span class="tag">pre-token protocols, ranked by implied value</span>
+  </div>
+  <p class="lede">Which protocol without a token is worth farming next — and what to do about it. Values come from the snapshot's own figures: TVL, 7-day growth and age. Nothing here is a promise of a token.</p>
+  <dl class="stats" id="stats"></dl>
+</header>
+
+<nav class="views" aria-label="Views">
+  <button type="button" id="tab-board" class="tab on" data-view="board">Pre-token board</button>
+  <button type="button" id="tab-live" class="tab" data-view="live">Live tokens, for comparison</button>
+</nav>
+
+<section class="toolbar" id="toolbar" aria-label="Board controls">
+  <label class="field">Search
+    <input id="q" type="search" placeholder="Protocol name or slug" autocomplete="off">
+  </label>
+  <label class="field">Chain
+    <select id="chain"><option value="">All chains</option></select>
+  </label>
+  <label class="field">Category
+    <select id="category"><option value="">All categories</option></select>
+  </label>
+  <label class="field">Sort by
+    <select id="sort">
+      <option value="implied">Implied value</option>
+      <option value="tvl">TVL</option>
+      <option value="change">7-day change</option>
+      <option value="age">Age, oldest first</option>
+      <option value="name">Name A–Z</option>
+    </select>
+  </label>
+  <p class="count" id="count" aria-live="polite"></p>
+</section>
+
+<div class="layout">
+  <main class="board-wrap">
+    <table class="board" id="board">
+      <thead>
+        <tr>
+          <th class="num">#</th>
+          <th>Protocol</th>
+          <th>Category</th>
+          <th>Chains</th>
+          <th class="num">TVL</th>
+          <th class="num">7d</th>
+          <th class="num">Age</th>
+          <th class="num">Implied value</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <table class="board live" id="live" hidden>
+      <thead>
+        <tr>
+          <th>Protocol</th>
+          <th>Category</th>
+          <th>Chains</th>
+          <th class="num">TVL</th>
+          <th class="num">Market cap</th>
+          <th class="num">7d</th>
+        </tr>
+      </thead>
+      <tbody id="live-rows"></tbody>
+    </table>
+    <p class="empty" id="empty" hidden>No protocol matches these filters. Clear the search or pick another chain or category.</p>
+  </main>
+
+  <aside class="detail" id="detail" aria-live="polite">
+    <p class="detail-hint">Click a row to see its farm plan and how its value was worked out.</p>
+  </aside>
+</div>
+
+<footer class="foot">
+  <h2>How the value is worked out</h2>
+  <p>Implied value = TVL × 0.30 (a token usually lists near a third of TVL) × launch odds × growth boost × 0.12 (the share of the listing value a farmer can expect). Launch odds follow age: 0.30 at birth, rising to 0.80 at two years old, back to 0.30 past four years — a protocol that has run two years without a token is at peak launch pressure. Growth boost is 1 + the 7-day TVL change (clamped to −40%…+100%) × 0.004. The board covers the 40-protocol watchlist (TVL at or above $50M, no token) plus every rankable pre-token protocol below that floor.</p>
+  <p class="fine">Snapshot: DefiLlama protocols, fetched 2026-11-14. This page runs entirely offline from its own data file; it fetches nothing. Not financial advice — a high implied value is a reason to look closer, not a promise.</p>
+</footer>
+
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
