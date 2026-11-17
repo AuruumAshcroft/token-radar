@@ -3,15 +3,29 @@
 // The board ranks pre-token protocols only. Every row's value comes from the
 // snapshot's own figures, never from a hand-kept list of names:
 //
-//   fdv       = tvl_usd x 0.30          (a token usually lists near a third of TVL)
+//   multiple  = the market's own valuation of the protocol's business model:
+//               the median live mcap/TVL among live protocols in the same
+//               category in this snapshot (at least five of them trading),
+//               or the all-live median when the category has too few;
+//               clamped to 0.05..0.60 so one wild category cannot dominate.
+//   size      = (1B / TVL)^0.3: a concave size factor, so a protocol ten
+//               times bigger is not worth ten times more — giant TVLs are
+//               mostly mercenary capital, and growth and age should matter.
+//   fdv       = TVL x multiple x size
 //   odds      = launch odds from age: a hump that peaks at two years old
 //               (0.30 at birth, 0.80 at the peak, back to 0.30 past four years)
-//   boost     = 1 + clamp(change_7d, -40, +100) x 0.004
+//   boost     = 1 + clamp(change_7d, -40, +100) x 0.008
 //   implied   = round(fdv x odds x boost x 0.12)
 //               (0.12 = the share of the listing value a farmer can expect)
 //
-// A protocol that already has a token is never ranked: the Live view shows the
-// market's own value for those instead.
+// Implied value is the TOTAL farmer pool for the protocol — 12% of its
+// listing value, adjusted by launch odds and growth — shared by every
+// farmer, never one wallet's share.
+//
+// A protocol that already has a token is never ranked: the Live view shows
+// the market's own value for those instead. The market multiple is read off
+// those live protocols, so the model values fee businesses the way the
+// market already values them, rather than by TVL alone.
 
 export interface Proto {
   slug: string;
@@ -34,16 +48,20 @@ export interface Snap {
   watchlist: string[];
 }
 
-export const MODEL_VERSION = 'radar-2';
+export const MODEL_VERSION = 'radar-3';
 
 export const MODEL = {
-  baseMultiple: 0.3,
+  categoryMinLive: 5,
+  categoryMultipleFloor: 0.05,
+  categoryMultipleCap: 0.6,
+  sizeRefUsd: 1_000_000_000,
+  sizePower: 0.3,
   farmerShare: 0.12,
   oddsFloor: 0.3,
   oddsPeak: 0.5,
   peakAgeDays: 730,
   oddsHorizonDays: 1460,
-  growthWeight: 0.004,
+  growthWeight: 0.008,
   growthFloor: -40,
   growthCap: 100,
   unknownAgeDays: 365,
@@ -66,6 +84,8 @@ export interface BoardRow {
   implied_value_usd: number;
   model: {
     fdv_usd: number;
+    category_multiple: number;
+    size_factor: number;
     launch_odds: number;
     growth_boost: number;
     farmer_share: number;
@@ -96,6 +116,8 @@ export interface RadarRow {
   age_days: number | null;
   implied_value_usd: number;
   fdv_usd: number;
+  category_multiple: number;
+  size_factor: number;
   launch_odds: number;
   growth_boost: number;
   farm_steps: string[];
@@ -186,19 +208,78 @@ export function growthBoost(change7d: number | null): number {
 export interface Valuation {
   value: number;
   fdv: number;
+  multiple: number;
+  sizeFactor: number;
   odds: number;
   boost: number;
   ageDays: number | null;
 }
 
-/** The implied value one protocol gets: FDV estimate x launch odds x growth x farmer share. */
-export function impliedValue(p: Proto, asOf: string): Valuation {
+export interface Calibration {
+  byCategory: Map<string, number>;
+  global: number;
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)]!;
+}
+
+/**
+ * The market's own valuation of each business model, read off the live
+ * protocols in this snapshot: the median live mcap/TVL per category when at
+ * least `categoryMinLive` protocols in that category trade, the all-live
+ * median otherwise. Clamped so one wild category cannot dominate. Nothing
+ * here names a protocol: the multiples are computed from the snapshot.
+ */
+export function categoryMultiples(snap: Snap): Calibration {
+  const live = snap.protocols.filter((p) => p.mcap_usd !== null && p.tvl_usd > 0);
+  const clamp = (n: number): number =>
+    Math.min(MODEL.categoryMultipleCap, Math.max(MODEL.categoryMultipleFloor, n));
+  const global = live.length > 0 ? clamp(median(live.map((p) => p.mcap_usd! / p.tvl_usd))) : 0.17;
+  const byCat = new Map<string, number[]>();
+  for (const p of live) {
+    const key = p.category ?? '';
+    const arr = byCat.get(key) ?? [];
+    arr.push(p.mcap_usd! / p.tvl_usd);
+    byCat.set(key, arr);
+  }
+  const byCategory = new Map<string, number>();
+  for (const [cat, values] of byCat) {
+    if (values.length >= MODEL.categoryMinLive) byCategory.set(cat, clamp(median(values)));
+  }
+  return { byCategory, global };
+}
+
+export function categoryMultiple(cal: Calibration, category: string | null): number {
+  if (category !== null) {
+    const m = cal.byCategory.get(category);
+    if (m !== undefined) return m;
+  }
+  return cal.global;
+}
+
+/**
+ * The implied value one protocol gets: its market-implied FDV (TVL x the
+ * category multiple, damped by size) x launch odds x growth x farmer share.
+ */
+export function impliedValue(p: Proto, asOf: string, cal: Calibration): Valuation {
   const ageDays = daysOld(asOf, p.listed_at);
-  const fdv = p.tvl_usd * MODEL.baseMultiple;
+  const multiple = categoryMultiple(cal, p.category);
+  const sizeFactor = Math.pow(MODEL.sizeRefUsd / Math.max(1, p.tvl_usd), MODEL.sizePower);
+  const fdv = p.tvl_usd * multiple * sizeFactor;
   const odds = launchOdds(ageDays);
   const boost = growthBoost(p.change_7d);
   const value = Math.max(1, Math.round(fdv * odds * boost * MODEL.farmerShare));
-  return { value, fdv: Math.round(fdv), odds: round4(odds), boost: round4(boost), ageDays };
+  return {
+    value,
+    fdv: Math.round(fdv),
+    multiple: round4(multiple),
+    sizeFactor: round4(sizeFactor),
+    odds: round4(odds),
+    boost: round4(boost),
+    ageDays,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -221,73 +302,138 @@ function holdDaysFor(ageDays: number | null): number {
   return 30;
 }
 
-/** Gas wording follows the farming chain: Solana is cents, EVM chains are dollars. */
+/** Chains where a transaction costs cents, not dollars. */
+const L2_CHAINS = new Set([
+  'base', 'arbitrum', 'optimism', 'unichain', 'ink', 'katana', 'zksync',
+  'linea', 'scroll', 'blast', 'mode', 'mantle', 'polygon', 'op_bnb', 'opbnb',
+]);
+
+/** Gas wording follows the farming chain: Solana and the L2s are cents, mainnets are dollars. */
 function gasNote(chains: string[]): { first: string; weekly: string } {
-  if (chains.length > 0 && chains[0]!.toLowerCase() === 'solana') {
-    return { first: 'a few cents of SOL', weekly: 'a few cents of SOL a week' };
-  }
+  if (chains.length === 0) return { first: '$2-5 of gas', weekly: 'about $2 of gas a week' };
+  const first = chains[0]!;
+  const lower = first.toLowerCase();
+  if (lower === 'solana') return { first: 'a few cents of SOL', weekly: 'a few cents of SOL a week' };
+  if (L2_CHAINS.has(lower)) return { first: `a few cents of gas on ${first}`, weekly: 'a few cents of gas a week' };
   return { first: '$2-5 of gas', weekly: 'about $2 of gas a week' };
 }
 
 interface Play {
   core: string;
   weekly: string;
+  /** What the farmer holds, for the hold step (default 'the position'). */
+  holding?: string;
+  /** What to check each week, for the monitor step (default: announcements). */
+  monitor?: string;
 }
 
+/** The monitor step when a category has no specific thing to watch: look for news, assume nothing. */
+const GENERIC_MONITOR =
+  `Check {name}'s own announcements page once a week and note any rewards, points or snapshot news; only follow links the protocol itself publishes.`;
+
 /**
- * One core action and one weekly action per category. Placeholders:
- * {name} the protocol, {cap} the capital in dollars, {chain} its first chain.
- * The match runs top to bottom, first hit wins.
+ * One core action, one weekly action, what is held and what to monitor, per
+ * category. Placeholders: {name} the protocol, {cap} the capital in dollars,
+ * {chain} its first chain. The match runs top to bottom, first hit wins.
  */
 const PLAYS: Array<{ test: (category: string) => boolean; play: Play }> = [
   { test: (c) => c.includes('cdp'), play: {
     core: 'Lock ${cap} of collateral in a {name} vault on {chain} and mint a small amount of its stable asset, keeping the vault well above the liquidation line.',
-    weekly: 'Top up or adjust the vault once so the position stays active, and check the collateral ratio while you are there.' } },
+    weekly: 'Top up or adjust the vault once so the position stays active, and check the collateral ratio while you are there.',
+    holding: 'the vault' } },
   { test: (c) => c.includes('yield aggregator'), play: {
     core: 'Deposit ${cap} of USDC into {name}\u2019s largest vault on {chain} and hold the vault shares.',
-    weekly: 'Claim or compound the vault yield once a week and leave the principal in the vault.' } },
+    weekly: 'Claim or compound the vault yield once a week and leave the principal in the vault.',
+    holding: 'the vault shares' } },
   { test: (c) => c.includes('risk curator') || c.includes('allocator') || c.includes('curator'), play: {
-    core: 'Deposit ${cap} of USDC into a {name} vault on {chain} and hold the shares through at least one rebalance.',
-    weekly: 'Review the vault allocation after each rebalance and keep the shares in place.' } },
+    core: 'Deposit ${cap} of USDC into a {name} Prime vault on {chain} and hold the vault shares through at least one rebalance. The curator picks the lending markets and takes a performance fee from the yield only; deposits sit in the lending protocol\u2019s own contracts.',
+    weekly: 'Check the vault\u2019s allocation and net APY after each rebalance and keep the shares in place; a rebalance moves deposits between markets the curator has vetted.',
+    holding: 'the vault shares',
+    monitor: `Read {name}'s vault reports and allocation updates once a week and note the net APY and any new market added; the curator publishes its own reports, so only follow links it publishes.` } },
+  { test: (c) => c.includes('liquidity manager'), play: {
+    core: 'Deposit ${cap} of USDC into a {name} managed liquidity position on {chain} and keep the position in range.',
+    weekly: 'Check the position range once a week and rebalance if it drifted out of range.',
+    holding: 'the liquidity position' } },
   { test: (c) => c.includes('basis'), play: {
     core: 'Deposit ${cap} of USDC into {name}\u2019s basis vault on {chain} and keep the position open through a full funding cycle.',
-    weekly: 'Check the funding rate and the vault performance once a week, and leave the position running.' } },
+    weekly: 'Check the funding rate and the vault performance once a week, and leave the position running.',
+    holding: 'the basis position' } },
   { test: (c) => c.includes('leveraged'), play: {
     core: 'Open a ${cap} leveraged farming position on {name} on {chain} at low leverage and watch the health factor.',
-    weekly: 'Check the health factor and rebalance once a week so the position never gets close to liquidation.' } },
+    weekly: 'Check the health factor and rebalance once a week so the position never gets close to liquidation.',
+    holding: 'the leveraged position' } },
   { test: (c) => c.includes('perpetual') || c.includes('derivative'), play: {
     core: 'Deposit ${cap} of USDC as margin on {name} on {chain} and open one small hedged position, then close it after a few days.',
-    weekly: 'Open and close one small position a week so the account shows steady trading activity.' } },
+    weekly: 'Open and close one small position a week so the account shows steady trading activity.',
+    holding: 'the margin deposit' } },
   { test: (c) => c.includes('lending') || c.includes('lend'), play: {
     core: 'Supply ${cap} of USDC to {name} on {chain} and leave the supply position open as collateral.',
-    weekly: 'Borrow $10-20 of a stablecoin against the collateral once, repay it the same week, and leave the supply in place.' } },
+    weekly: 'Borrow $10-20 of a stablecoin against the collateral once, repay it the same week, and leave the supply in place.',
+    holding: 'the supply position' } },
   { test: (c) => c.includes('dex'), play: {
     core: 'Swap ${cap} of USDC into the pool\u2019s other asset on {name} on {chain}, then add both sides as liquidity and leave the LP position open.',
-    weekly: 'Swap $10-25 through {name} once a week so the wallet shows repeat volume instead of one deposit.' } },
+    weekly: 'Swap $10-25 through {name} once a week so the wallet shows repeat volume instead of one deposit.',
+    holding: 'the LP position' } },
   { test: (c) => c.includes('bridge'), play: {
     core: 'Bridge ${cap} of USDC to {chain} through {name}, then put the bridged funds to work in the destination app instead of bridging straight back.',
-    weekly: 'Bridge a small amount ($10-25) in either direction once a week to keep the route active.' } },
+    weekly: 'Bridge a small amount ($10-25) in either direction once a week to keep the route active.',
+    holding: 'the bridged funds' } },
   { test: (c) => c.includes('staking') || c.includes('restak'), play: {
     core: 'Stake ${cap} of the chain asset through {name} on {chain} and keep the staking receipt in the farming wallet.',
-    weekly: 'Claim the staking rewards once a week and restake them.' } },
+    weekly: 'Claim the staking rewards once a week and restake them.',
+    holding: 'the stake' } },
   { test: (c) => c.includes('prediction'), play: {
     core: 'Fund the wallet with ${cap} and place one small prediction position on {name}, then settle it and keep the history.',
-    weekly: 'Place one small market position a week on {name} so the account stays active.' } },
+    weekly: 'Place one small market position a week on {name} so the account stays active.',
+    holding: 'the prediction history' } },
   { test: (c) => c.includes('insurance'), play: {
     core: 'Buy ${cap} of cover from {name} on {chain} and keep the policy active.',
-    weekly: 'Review the policy and the covered positions once a week, and renew before it lapses.' } },
+    weekly: 'Review the policy and the covered positions once a week, and renew before it lapses.',
+    holding: 'the cover' } },
   { test: (c) => c.includes('stable'), play: {
     core: 'Mint or hold ${cap} of the stable asset through {name} on {chain}, then use it in one on-chain action a week.',
-    weekly: 'Use the stable asset in a swap or a deposit once a week so the wallet shows real usage.' } },
+    weekly: 'Use the stable asset in a swap or a deposit once a week so the wallet shows real usage.',
+    holding: 'the stable asset' } },
   { test: (c) => c.includes('rwa'), play: {
     core: 'Mint or buy ${cap} of {name}\u2019s yield-bearing asset on {chain} and hold it in the farming wallet.',
-    weekly: 'Check the asset\u2019s yield accrual once a week and keep the holding untouched.' } },
+    weekly: 'Check the asset\u2019s yield accrual once a week and keep the holding untouched.',
+    holding: 'the yield-bearing asset' } },
   { test: (c) => c.includes('yield'), play: {
     core: 'Deposit ${cap} of USDC into {name}\u2019s highest-yield pool on {chain} and keep the position open.',
-    weekly: 'Harvest the yield once a week and redeposit it so the balance compounds.' } },
+    weekly: 'Harvest the yield once a week and redeposit it so the balance compounds.',
+    holding: 'the yield position' } },
   { test: (c) => c.includes('payment'), play: {
     core: 'Route ${cap} of USDC through {name} on {chain} for a real payment or transfer, and keep the receipt.',
-    weekly: 'Make one small payment through {name} each week.' } },
+    weekly: 'Make one small payment through {name} each week.',
+    holding: 'the payment receipt' } },
+  { test: (c) => c.includes('cedefi'), play: {
+    core: 'Deposit ${cap} of USDC into {name}\u2019s yield product on {chain} and keep the deposit in place.',
+    weekly: 'Check the yield and the position once a week and leave the principal in place.',
+    holding: 'the deposit' } },
+  { test: (c) => c.includes('btc'), play: {
+    core: 'Mint or buy ${cap} of {name}\u2019s BTC-backed asset on {chain} and hold it in the farming wallet.',
+    weekly: 'Check the backing and the yield once a week and keep the holding untouched.',
+    holding: 'the BTC-backed holding' } },
+  { test: (c) => c.includes('collateral'), play: {
+    core: 'Supply ${cap} of collateral through {name} on {chain} and keep the position open as backing for a borrow.',
+    weekly: 'Check the collateral ratio once a week and top it up before it gets close to liquidation.',
+    holding: 'the collateral position' } },
+  { test: (c) => c.includes('governance'), play: {
+    core: 'Lock ${cap} of the governance asset through {name} on {chain} and vote on one proposal while it is locked.',
+    weekly: 'Vote on any open proposal once a week and keep the lock in place.',
+    holding: 'the locked position' } },
+  { test: (c) => c.includes('card'), play: {
+    core: 'Order the {name} card, load it with ${cap} of USDC and spend from it at least once.',
+    weekly: 'Spend a small amount with the card once a week and keep the card funded.',
+    holding: 'the card balance' } },
+  { test: (c) => c === 'chain', play: {
+    core: 'Bridge ${cap} of USDC to {name} and use it in the chain\u2019s main app, then keep a balance in the farming wallet.',
+    weekly: 'Use one app on {name} a week \u2014 a swap, a deposit or a transfer \u2014 so the wallet shows steady activity.',
+    holding: 'the on-chain balance' } },
+  { test: (c) => c === 'farm', play: {
+    core: 'Deposit ${cap} of USDC into the {name} farm on {chain} and keep the position staked.',
+    weekly: 'Harvest the farm rewards once a week and restake them.',
+    holding: 'the staked position' } },
 ];
 
 const FALLBACK_PLAY: Play = {
@@ -309,7 +455,9 @@ function fitStep(text: string): string {
 /**
  * A protocol's farm plan: six steps, each an action with its cost and time.
  * Everything derives from the protocol's own record (category, chains, TVL,
- * age); no protocol name is ever special-cased.
+ * age); no protocol name is ever special-cased. Step 4 never assumes a
+ * points program exists: it tells the farmer to check the protocol's own
+ * announcements, or the curator's own reports for a vault curator.
  */
 export function farmPlan(p: Proto, ageDays: number | null): string[] {
   const chain = p.chains.length > 0 ? p.chains[0]! : 'its main chain';
@@ -318,13 +466,14 @@ export function farmPlan(p: Proto, ageDays: number | null): string[] {
   const gas = gasNote(p.chains);
   const category = (p.category ?? '').toLowerCase();
   const play = PLAYS.find((entry) => entry.test(category))?.play ?? FALLBACK_PLAY;
+  const holding = play.holding ?? 'the position';
   return [
-    fitStep(`Set up a fresh wallet that holds only the funds you plan to farm, and store its seed phrase offline. Cost: ${gas.first} for the first transaction. Time: 5 minutes.`),
+    fitStep(`Set up a fresh wallet for farming on ${chain} that holds only the funds you plan to farm, and store its seed phrase offline. Cost: ${gas.first} for the first transaction. Time: 5 minutes.`),
     fitStep(`${fill(play.core, p.name, cap, chain)} Cost: $${cap} of capital plus ${gas.first}. Time: 15 minutes to set up.`),
     fitStep(`${fill(play.weekly, p.name, cap, chain)} Cost: ${gas.weekly}. Time: 10 minutes a week.`),
-    fitStep(`Open ${p.name}'s own points or rewards page once a week and write down the points balance; only follow links the protocol itself publishes. Cost: free to check. Time: 10 minutes a week.`),
-    fitStep(`Hold the position for at least ${hold} days so the activity lands in more than one snapshot. Cost: the $${cap} stays in the position. Time: ${hold} days.`),
-    fitStep(`When the token launches, claim only from the protocol's own page and never pay anyone to claim for you; write the wallet, the dates and every transaction in a farm log. Cost: gas to claim. Time: 15 minutes.`),
+    fitStep(`${fill(play.monitor ?? GENERIC_MONITOR, p.name, cap, chain)} Cost: free to check. Time: 10 minutes a week.`),
+    fitStep(`Hold ${holding} for at least ${hold} days so the activity lands in more than one snapshot. Cost: the $${cap} stays in the position. Time: ${hold} days.`),
+    fitStep(`When the token launches, claim only from the protocol's own page and never pay anyone to claim for you; write the wallet, the dates and every transaction in a farm log. Cost: ${gas.first} to claim. Time: 15 minutes.`),
   ];
 }
 
@@ -348,7 +497,8 @@ export function buildBoard(snap: Snap): BoardRow[] {
     .sort(bySlugDesc);
   for (const p of early) picked.set(p.slug, p);
 
-  const valued = [...picked.values()].map((p) => ({ p, v: impliedValue(p, snap.as_of) }));
+  const cal = categoryMultiples(snap);
+  const valued = [...picked.values()].map((p) => ({ p, v: impliedValue(p, snap.as_of, cal) }));
   valued.sort((a, b) => b.v.value - a.v.value || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
   return valued.map((entry, i) => {
     const p = entry.p;
@@ -370,6 +520,8 @@ export function buildBoard(snap: Snap): BoardRow[] {
       implied_value_usd: v.value,
       model: {
         fdv_usd: v.fdv,
+        category_multiple: v.multiple,
+        size_factor: v.sizeFactor,
         launch_odds: v.odds,
         growth_boost: v.boost,
         farmer_share: MODEL.farmerShare,
@@ -423,6 +575,8 @@ export function radarPayload(snap: Snap, board: BoardRow[], live: LiveRow[]): Ra
       age_days: r.age_days,
       implied_value_usd: r.implied_value_usd,
       fdv_usd: r.model.fdv_usd,
+      category_multiple: r.model.category_multiple,
+      size_factor: r.model.size_factor,
       launch_odds: r.model.launch_odds,
       growth_boost: r.model.growth_boost,
       farm_steps: r.farm_steps,

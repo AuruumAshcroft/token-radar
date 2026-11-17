@@ -54,7 +54,10 @@
   }
 
   function chainList(chains) {
-    return (chains || []).slice(0, 3).join(', ') || '—';
+    var list = chains || [];
+    if (list.length === 0) return '—';
+    if (list.length <= 2) return list.join(', ');
+    return list.slice(0, 2).join(', ') + ' +' + (list.length - 2) + ' more';
   }
 
   /* ---------------- filters, sorting, hash ---------------- */
@@ -91,6 +94,8 @@
     state.sort = h.sort || 'implied';
     state.view = h.view === 'live' ? 'live' : 'board';
     state.slug = h.slug || '';
+    // No protocol chosen: open on rank #1, so the detail panel is never empty.
+    if (!state.slug && DATA.rows.length) state.slug = DATA.rows[0].slug;
     els.q.value = state.q;
     els.chain.value = state.chain;
     els.category.value = state.category;
@@ -125,7 +130,8 @@
       ['Board rows', String(DATA.board_size)],
       ['Watchlist', String(DATA.watchlist_size)],
       ['Early finds', String(DATA.early_size)],
-      ['Top implied value', top ? money(top.implied_value_usd) : '—'],
+      ['Live tokens', String(DATA.live_size)],
+      ['Top farmer pool', top ? money(top.implied_value_usd) : '—'],
       ['Snapshot', DATA.as_of || '—'],
     ];
     els.stats.innerHTML = cells.map(function (c) {
@@ -155,8 +161,7 @@
       : ' <span class="early">EARLY</span>';
     return '<tr data-slug="' + esc(r.slug) + '" class="' + (state.slug === r.slug ? 'sel' : '') + '">' +
       '<td class="num rank">' + r.rank + '</td>' +
-      '<td><span class="proto-name">' + esc(r.name) + '</span>' + badge +
-        '<span class="slug">' + esc(r.slug) + '</span></td>' +
+      '<td><span class="proto-name">' + esc(r.name) + '</span>' + badge + '</td>' +
       '<td>' + esc(r.category || '—') + '</td>' +
       '<td>' + esc(chainList(r.chains)) + '</td>' +
       '<td class="num">' + money(r.tvl_usd) + '</td>' +
@@ -212,13 +217,13 @@
         '<div><dt>TVL</dt><dd>' + moneyFull(row.tvl_usd) + '</dd></div>' +
         '<div><dt>7-day change</dt><dd class="' + change.cls + '">' + change.text + '</dd></div>' +
         '<div><dt>Age</dt><dd>' + (row.age_days == null ? 'Unknown' : row.age_days + ' days') + '</dd></div>' +
-        '<div><dt>First tracked</dt><dd>' + esc(row.listed_at || 'Unknown') + '</dd></div>' +
-        '<div><dt>Chains</dt><dd>' + esc((row.chains || []).join(', ') || '—') + '</dd></div>' +
       '</dl>' +
       '<h3>How the value is worked out</h3>' +
-      '<p class="math">FDV estimate <code>' + moneyFull(row.fdv_usd) + '</code> × launch odds <code>' +
-        row.launch_odds + '</code> × growth boost <code>' + row.growth_boost +
-        '</code> × farmer share <code>0.12</code> = <code>' + moneyFull(row.implied_value_usd) + '</code></p>' +
+      '<p class="math">FDV <code>' + moneyFull(row.fdv_usd) + '</code> = TVL × multiple <code>' +
+        row.category_multiple + '</code> × size <code>' + row.size_factor + '</code>; × odds <code>' +
+        row.launch_odds + '</code> × growth <code>' + row.growth_boost +
+        '</code> × 0.12 = <code>' + moneyFull(row.implied_value_usd) + '</code></p>' +
+      '<p class="pool-note">Total farmer pool: 12% of the listing value, adjusted by launch odds and growth — shared by every farmer, not one wallet\u2019s share.</p>' +
       '<h3>Farm plan</h3>' +
       '<ol class="steps">' + steps + '</ol>';
   }
@@ -265,7 +270,7 @@
     renderAll();
   });
 
-  applyHash();
   renderOptions();
+  applyHash();
   renderAll();
 })();

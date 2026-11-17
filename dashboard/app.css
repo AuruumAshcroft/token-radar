@@ -154,7 +154,7 @@ h1 {
   margin: 0 auto;
   padding: 0 20px 24px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) 400px;
   gap: 20px;
   align-items: start;
 }
@@ -173,7 +173,7 @@ table.board {
 
 .board th,
 .board td {
-  padding: 9px 12px;
+  padding: 7px 12px;
   text-align: left;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
@@ -197,7 +197,7 @@ table.board {
 .num { text-align: right; }
 .rank { color: var(--amber); font-weight: 700; }
 .proto-name { font-weight: 650; }
-.slug { display: block; font-size: 12px; color: var(--faint); }
+.slug { display: inline; font-size: 12px; color: var(--faint); margin-left: 6px; }
 .watch { color: var(--amber); font-size: 11px; font-weight: 700; letter-spacing: .05em; }
 .early { color: var(--blue); font-size: 11px; font-weight: 700; letter-spacing: .05em; }
 .implied { font-weight: 700; color: var(--amber); }
@@ -211,7 +211,7 @@ table.board {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 18px;
+  padding: 10px 14px;
   position: sticky;
   top: 16px;
   max-height: calc(100vh - 32px);
@@ -220,10 +220,10 @@ table.board {
 
 .detail-hint { color: var(--muted); margin: 0; }
 
-.detail h2 { margin: 0 0 2px; font-size: 21px; }
-.detail .sub { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+.detail h2 { margin: 0 0 2px; font-size: 19px; }
+.detail .sub { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
 .detail h3 {
-  margin: 18px 0 8px;
+  margin: 10px 0 5px;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: .08em;
@@ -233,7 +233,7 @@ table.board {
 .facts {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px 12px;
+  gap: 4px 12px;
   margin: 0;
 }
 
@@ -243,7 +243,7 @@ table.board {
 
 .math {
   margin: 0;
-  padding: 10px 12px;
+  padding: 6px 10px;
   background: var(--panel-2);
   border-radius: 8px;
   font-size: 13px;
@@ -252,8 +252,14 @@ table.board {
 
 .math code { color: var(--amber); }
 
-.steps { margin: 0; padding-left: 20px; }
-.steps li { margin: 0 0 10px; }
+.pool-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.steps { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.4; }
+.steps li { margin: 0 0 4px; }
 .steps li::marker { color: var(--amber); font-weight: 700; }
 
 .foot {

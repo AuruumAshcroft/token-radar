@@ -13,7 +13,7 @@
     <h1>TOKEN RADAR</h1>
     <span class="tag">pre-token protocols, ranked by implied value</span>
   </div>
-  <p class="lede">Which protocol without a token is worth farming next — and what to do about it. Values come from the snapshot's own figures: TVL, 7-day growth and age. Nothing here is a promise of a token.</p>
+  <p class="lede">Which protocol without a token is worth farming next — and what to do about it. Values come from the snapshot's own figures: TVL, 7-day growth, age, and how the market already values each business model. Nothing here is a promise of a token.</p>
   <dl class="stats" id="stats"></dl>
 </header>
 
@@ -56,7 +56,7 @@
           <th class="num">TVL</th>
           <th class="num">7d</th>
           <th class="num">Age</th>
-          <th class="num">Implied value</th>
+          <th class="num">Implied</th>
         </tr>
       </thead>
       <tbody id="rows"></tbody>
@@ -84,7 +84,7 @@
 
 <footer class="foot">
   <h2>How the value is worked out</h2>
-  <p>Implied value = TVL × 0.30 (a token usually lists near a third of TVL) × launch odds × growth boost × 0.12 (the share of the listing value a farmer can expect). Launch odds follow age: 0.30 at birth, rising to 0.80 at two years old, back to 0.30 past four years — a protocol that has run two years without a token is at peak launch pressure. Growth boost is 1 + the 7-day TVL change (clamped to −40%…+100%) × 0.004. The board covers the 40-protocol watchlist (TVL at or above $50M, no token) plus every rankable pre-token protocol below that floor.</p>
+  <p>Implied value is the total farmer pool for a protocol: its market-implied listing value × launch odds × growth boost × 0.12, the share of the listing value a farmer can expect — the whole pool for every farmer, not one wallet's share. The listing value is TVL × the market multiple for the protocol's business model × a size factor (1B / TVL)^0.3, so a protocol ten times bigger is not worth ten times more. The multiple is the median live mcap/TVL among live protocols in the same category in this snapshot (at least five of them trading; the all-live median 0.17 otherwise), clamped to 0.05…0.60 — Dexs 0.34, RWA 0.27, Lending 0.13, Yield 0.12, Yield Aggregator 0.05, Basis Trading 0.60 (capped). Launch odds follow age: 0.30 at birth, rising to 0.80 at two years old, back to 0.30 past four years — a protocol that has run two years without a token is at peak launch pressure. Growth boost is 1 + the 7-day TVL change (clamped to −40%…+100%) × 0.008. The board covers the 40-protocol watchlist (TVL at or above $50M, no token) plus every rankable pre-token protocol below that floor.</p>
   <p class="fine">Snapshot: DefiLlama protocols, fetched 2026-11-14. This page runs entirely offline from its own data file; it fetches nothing. Not financial advice — a high implied value is a reason to look closer, not a promise.</p>
 </footer>
 
